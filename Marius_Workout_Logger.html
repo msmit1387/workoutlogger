@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Marius Workout Logger (Single File)</title>
+  <title>Marius Workout Logger (Simplified)</title>
   <meta name="theme-color" content="#0f172a"/>
   <style>
     :root { --bg:#0b1020; --card:#111936; --muted:#a8b3cf; --txt:#e6ecff; --acc:#4ade80; --danger:#f87171; }
@@ -24,6 +24,7 @@
     .exercise { border-top:1px dashed #263455; padding-top:12px; margin-top:12px; }
     .muted { color:var(--muted); font-size:13px; }
     .pill { display:inline-block; padding:3px 8px; border-radius:999px; background:#0e1530; border:1px solid #2b3a64; font-size:12px; color:#a8b3cf; }
+    .badge { display:inline-block; padding:4px 10px; border-radius:999px; background:#0f1733; border:1px solid #27345b; font-size:12px; color:#cdd7ff; }
     .footer { margin-top:48px; color:#93a1c8; font-size:12px; text-align:center; }
     .kpis { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin:12px 0; }
     .kpi { background:#0f1733; border:1px solid #27345b; padding:10px; border-radius:12px; text-align:center; }
@@ -54,6 +55,11 @@
         </div>
       </div>
 
+      <div class="row" style="align-items:center; justify-content:space-between; margin-top:8px;">
+        <div class="badge" id="badge-duration">Duration</div>
+        <div class="badge" id="badge-rir">RIR guidance</div>
+      </div>
+
       <div class="kpis">
         <div class="kpi"><div class="muted">Sets logged</div><div id="kpi-sets">0</div></div>
         <div class="kpi"><div class="muted">Exercises done</div><div id="kpi-ex">0</div></div>
@@ -65,7 +71,7 @@
         <button id="save" class="primary">Save Session</button>
         <button id="clear" class="danger">Clear All Inputs</button>
       </div>
-      <p class="muted" style="margin-top:8px">Suggestions appear after you’ve logged at least one prior session for that exact exercise & day (A/B kept separate).</p>
+      <p class="muted" style="margin-top:8px">Log just reps and kg. Last performance for each exercise shows inline.</p>
     </section>
 
     <!-- HISTORY PAGE -->
@@ -88,11 +94,11 @@
       <p class="muted">Data is saved locally (in your browser). Export regularly for backup.</p>
     </section>
 
-    <div class="footer">v1.2 — Single-file build • A/B days logged separately • Works offline</div>
+    <div class="footer">v1.3 — Simple logging • Inline last set • Routine RIR & duration shown</div>
   </main>
 
   <script>
-  // ----------- DATA: YOUR SIX WORKOUTS -----------
+  // ----------- DATA: Your routines -----------
   const WORKOUTS = {
     "Push A": [
       "Incline DB press (15–30°) — 4×6–10",
@@ -148,8 +154,30 @@
     ]
   };
 
+  // Typical duration per routine (from your plan)
+  // Push A & Legs A have 90m trims → treat as 2h typical
+  // Pull A is 90m default; Push B has 2h add-ons (typical 90m); Pull B 2h; Legs B 2h (with optional sled)
+  const DURATION = {
+    "Push A": "2h (trim to 90m available)",
+    "Push B": "90m (2h add-ons optional)",
+    "Legs A": "2h (trim to 90m available)",
+    "Legs B": "2h (optional sled)",
+    "Pull A": "90m (default)",
+    "Pull B": "2h (width emphasis)"
+  };
+
+  // RIR guidance text per routine
+  const RIR_GUIDE = {
+    "Push A": "Most sets 1–2 RIR; one key chest press can go 0 RIR last set.",
+    "Push B": "1–2 RIR; prioritize delt quality. Keep presses smooth.",
+    "Legs A": "1–2 RIR on main quad moves; controlled calves.",
+    "Legs B": "2 RIR on RDL; 1–2 RIR on hip thrust/curls.",
+    "Pull A": "1–2 RIR; chest-supported rows, no shrugging.",
+    "Pull B": "1–2 RIR; strict form on pull-ups/lat work."
+  };
+
   // ----------- STORAGE -----------
-  const KEY="marius_logger_v1";
+  const KEY="marius_logger_v1_simple";
   function loadDB(){ try { return JSON.parse(localStorage.getItem(KEY)) || {logs:[]}; } catch(e){ return {logs:[]}; } }
   function saveDB(db){ localStorage.setItem(KEY, JSON.stringify(db)); }
 
@@ -168,25 +196,37 @@
   const kpiSets=document.getElementById('kpi-sets');
   const kpiEx=document.getElementById('kpi-ex');
   const kpiTon=document.getElementById('kpi-ton');
+  const badgeDuration=document.getElementById('badge-duration');
+  const badgeRIR=document.getElementById('badge-rir');
 
-  // ----------- INIT (default once; do not override in render) -----------
+  // ----------- INIT -----------
   function init(){
     const ws = Object.keys(WORKOUTS);
-    selWorkout.innerHTML=''; selHistWorkout.innerHTML='';
-    ws.forEach(w=>{
-      let a=document.createElement('option'); a.value=w; a.textContent=w; selWorkout.appendChild(a);
-      let b=document.createElement('option'); b.value=w; b.textContent=w; selHistWorkout.appendChild(b);
-    });
+    selWorkout.innerHTML=''; 
+    ws.forEach(w=>{ let a=document.createElement('option'); a.value=w; a.textContent=w; selWorkout.appendChild(a); });
+    // history selectors
+    const hW=document.getElementById('h-workout'); const hE=document.getElementById('h-exercise');
+    hW.innerHTML=''; ws.forEach(w=>{ let o=document.createElement('option'); o.value=w; o.textContent=w; hW.appendChild(o); });
+
     selWorkout.value = ws[0];
     dateInput.valueAsDate = new Date();
+
     renderExercises();
     renderHistorySelectors();
     updateKPIs();
-    selWorkout.addEventListener('change', ()=>{ renderExercises(); updateKPIs(); });
+    updateBadges();
+
+    selWorkout.addEventListener('change', ()=>{ renderExercises(); updateKPIs(); updateBadges(); });
     dateInput.addEventListener('change', updateKPIs);
   }
 
-  // ----------- RENDER EXERCISES -----------
+  function updateBadges(){
+    const w = selWorkout.value;
+    badgeDuration.textContent = `Duration: ${DURATION[w]||'—'}`;
+    badgeRIR.textContent = `RIR: ${RIR_GUIDE[w]||'1–2 RIR'}`;
+  }
+
+  // ----------- RENDER EXERCISES (inline last performance) -----------
   function renderExercises(){
     list.innerHTML='';
     const w = selWorkout.value || Object.keys(WORKOUTS)[0];
@@ -197,6 +237,7 @@
       const repMin  = setsMatch ? parseInt(setsMatch[2]) : 8;
       const repMax  = setsMatch ? parseInt(setsMatch[3]) : 12;
       const last = lastSession(w, ex);
+
       const div = document.createElement('div');
       div.className='exercise';
       div.innerHTML = `
@@ -206,24 +247,15 @@
         </div>
         <div class="grid" style="margin-top:8px;">
           <div>
-            <label>Sets × Reps</label>
-            <input id="sr-${idx}" placeholder="${defSets} sets in ${repMin}–${repMax} reps" />
+            <label>Reps (comma list)</label>
+            <input id="sr-${idx}" placeholder="${defSets} sets in ${repMin}–${repMax} reps (e.g. 10,10,9,8)" />
           </div>
           <div>
-            <label>Load (kg)</label>
-            <input id="ld-${idx}" placeholder="e.g. 30, 30, 27.5" />
+            <label>Load (kg, comma list)</label>
+            <input id="ld-${idx}" placeholder="e.g. 30,30,27.5,27.5" />
           </div>
         </div>
-        <div class="grid">
-          <div>
-            <label>RIR (per set)</label>
-            <input id="rr-${idx}" placeholder="e.g. 2, 1, 1" />
-          </div>
-          <div>
-            <label>Suggestion</label>
-            <div class="muted" id="sg-${idx}">${suggestionText(w, ex, repMin, repMax)}</div>
-          </div>
-        </div>
+        <div class="muted" style="margin-top:6px">${suggestionText(w, ex, repMin, repMax)}</div>
       `;
       list.appendChild(div);
     });
@@ -245,17 +277,17 @@
   }
   function suggestionText(workout, exercise, repMin, repMax){
     const prev = priorTwo(workout, exercise);
-    if(!prev.length) return "Aim mid-range. Log to unlock suggestions.";
+    if(!prev.length) return "Tip: Aim mid-range today; log to unlock suggestions.";
     const last = prev[0];
     const allTop = last.sets.every(s=>s.reps>=repMax);
     const twoTop = (prev.length===2) && prev[1].sets.every(s=>s.reps>=repMax);
-    if(allTop && twoTop) return "✅ Top range twice — try +2.5–5% load.";
+    if(allTop && twoTop) return "✅ Hit top range twice — try +2.5–5% load.";
     const firstBelow = last.sets.findIndex(s=>s.reps<repMax);
     if(firstBelow>=0) return `Add +1 rep on set ${firstBelow+1} (target ${repMax}).`;
-    return "Hold load; focus on slower eccentrics or tighter form.";
+    return "Hold load; tighten form or slow eccentrics.";
   }
 
-  // ----------- SAVE SESSION -----------
+  // ----------- SAVE SESSION (reps + kg only) -----------
   document.getElementById('save').onclick=()=>{
     const w = selWorkout.value;
     const exs = WORKOUTS[w];
@@ -264,9 +296,8 @@
     exs.forEach((ex, idx)=>{
       const sr=document.getElementById('sr-'+idx).value.trim();
       const ld=document.getElementById('ld-'+idx).value.trim();
-      const rr=document.getElementById('rr-'+idx).value.trim();
-      if(!sr && !ld && !rr) return;
-      const sets = parseSets(sr, ld, rr);
+      if(!sr && !ld) return;
+      const sets = parseSets(sr, ld);
       entries.push({ workout:w, exercise:ex, date, sets, ts:Date.now() });
     });
     if(!entries.length){ alert("No inputs to save."); return; }
@@ -275,19 +306,16 @@
     renderExercises(); updateKPIs(); renderHistorySelectors();
   };
 
-  // ----------- PARSER (FIXED: saves exactly what you type) -----------
-  function parseSets(sr, ld, rr){
+  // ----------- PARSER (saves exactly what you type) -----------
+  function parseSets(sr, ld){
     const repsList = (sr||'').split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
     const loadsList= (ld||'').split(',').map(s=>parseFloat(s.trim())).filter(n=>!isNaN(n));
-    const rirList  = (rr||'').split(',').map(s=>parseFloat(s.trim())).filter(n=>!isNaN(n));
-    // Use the longest of what the user actually entered (at least 1 set)
-    const n = Math.max(repsList.length, loadsList.length, rirList.length, 1);
+    const n = Math.max(repsList.length, loadsList.length, 1);
     const sets=[];
     for(let i=0;i<n;i++){
       const reps = repsList[i] ?? repsList[0] ?? 10;
       const weight = loadsList[i] ?? loadsList[0] ?? 0;
-      const rir = rirList[i] ?? 2;
-      sets.push({ reps, weight, rir });
+      sets.push({ reps, weight });
     }
     return sets;
   }
@@ -306,20 +334,21 @@
 
   // ----------- HISTORY -----------
   function renderHistorySelectors(){
-    const w = selHistWorkout.value || Object.keys(WORKOUTS)[0];
-    selHistWorkout.value = w;
-    selHistExercise.innerHTML='';
+    const w = document.getElementById('h-workout').value || Object.keys(WORKOUTS)[0];
+    document.getElementById('h-workout').value = w;
+    const sel = document.getElementById('h-exercise');
+    sel.innerHTML='';
     (WORKOUTS[w]||[]).forEach(ex=>{
-      const o=document.createElement('option'); o.value=ex; o.textContent=ex; selHistExercise.appendChild(o);
+      const o=document.createElement('option'); o.value=ex; o.textContent=ex; sel.appendChild(o);
     });
     renderHistory();
   }
-  selHistWorkout.onchange=renderHistorySelectors;
-  selHistExercise.onchange=renderHistory;
+  document.getElementById('h-workout').onchange=renderHistorySelectors;
+  document.getElementById('h-exercise').onchange=renderHistory;
 
   function renderHistory(){
-    const w = selHistWorkout.value;
-    const ex = selHistExercise.value;
+    const w = document.getElementById('h-workout').value;
+    const ex = document.getElementById('h-exercise').value;
     const db=loadDB();
     const logs = db.logs.filter(l=>l.workout===w && l.exercise===ex).sort((a,b)=>b.ts-a.ts);
     const container=document.getElementById('history');
@@ -334,7 +363,7 @@
           <strong>${l.date}</strong>
           <span class="pill">Tonnage: ${Math.round(ton)} kg</span>
         </div>
-        <div class="muted">Sets: ${l.sets.map(s=> s.weight+'kg × '+s.reps+' @RIR'+s.rir).join(' | ')}</div>
+        <div class="muted">Sets: ${l.sets.map(s=> s.weight+'kg × '+s.reps).join(' | ')}</div>
       `;
       container.appendChild(div);
     });
